@@ -1,0 +1,68 @@
+name: Deploy Flask App to EC2 using Docker
+
+on:
+  push:
+    branches:
+      - main  # Triggers the workflow when pushing to the main branch
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v2
+      with:
+        ref: main  # Fetch the latest code from the main branch
+
+    - name: SSH to EC2
+      uses: appleboy/ssh-action@v1.2.0
+      with:
+        host: ${{ secrets.EC2_PUBLIC_IP }}
+        username: ubuntu
+        key: ${{ secrets.UBUNTU_AWS }}
+        port: 22
+        script: |
+        
+          set -e  # Exit immediately if a command fails
+
+          sudo apt update -y
+
+          # Clone or pull Customer Churn CI/CD
+          if [ -d "CI-CD-DevOps/.git" ]; then
+            echo "Updating Customer Churn CI/CD repo..."
+            cd CI-CD-DevOps
+            git pull origin main
+          else
+            echo "Cloning frontend repo..."
+            git clone https://github.com/AdityaSuresh013/CI-CD-DevOps
+            cd CI-CD-DevOps
+          fi
+
+          # Check and install Docker if necessary
+          if ! command -v docker &> /dev/null
+          then
+              echo "Docker not found, installing Docker..."
+              sudo apt-get update -y
+              sudo apt-get install -y docker.io
+              sudo systemctl start docker
+              sudo systemctl enable docker
+          fi
+
+
+          # Stop and remove existing container if running
+          if [ "$(docker ps -aq -f name=customer-churn)" ]; then
+              docker stop customer-churn
+              docker rm customer-churn
+              docker rmi customer-churn
+          fi
+
+          # Build Docker image
+          docker build -t customer-churn .
+
+          # Run the Docker container
+          docker run -d \
+            --name customer-churn \
+            -p 80:8501 \
+            --restart unless-stopped \
+            customer-churn
